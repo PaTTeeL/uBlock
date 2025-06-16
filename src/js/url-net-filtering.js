@@ -70,16 +70,25 @@ class RuleEntry {
 
 /******************************************************************************/
 
-function indexOfURL(entries, url) {
-    // TODO: binary search -- maybe, depends on common use cases
+function indexOfURL(entries, url, threshold) {
     const urlLen = url.length;
     // URLs must be ordered by increasing length.
-    for ( let i = 0; i < entries.length; i++ ) {
-        const entry = entries[i];
-        if ( entry.url.length > urlLen ) { break; }
-        if ( entry.url === url ) { return i; }
+    const n = entries.length;
+    if (n > threshold) { // Apply binary search when entries.length exceeds the threshold.
+        const startIndex = indexFromLength(entries, urlLen -1, threshold);
+        const endIndexExclusive = indexFromLength(entries, urlLen, threshold);
+        for (let i = startIndex; i < endIndexExclusive; i++) {
+            if (entries[i].url === url) { return i; }
+        }
+        return -1;
+    } else {
+        for ( let i = 0; i < entries.length; i++ ) {
+            const entry = entries[i];
+            if ( entry.url.length > urlLen ) { break; }
+            if ( entry.url === url ) { return i; }
+        }
+        return -1;
     }
-    return -1;
 }
 
 /******************************************************************************/
@@ -104,31 +113,42 @@ function indexOfMatch(entries, url) {
 
 /******************************************************************************/
 
-function indexFromLength(entries, len) {
-    // TODO: binary search -- maybe, depends on common use cases
+function indexFromLength(entries, len, threshold)  {
     // URLs must be ordered by increasing length.
-    for ( let i = 0; i < entries.length; i++ ) {
-        if ( entries[i].url.length > len ) { return i; }
+    const n = entries.length;
+    if (n > threshold) {  // Apply binary search when entries.length exceeds the threshold.
+        let low = 0;
+        let high = n;
+        while (low < high) {
+            const mid = Math.floor((low + high) / 2);
+            if (entries[mid].url.length <= len) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        return low;
+    } else {
+        for ( let i = 0; i < n; i++ ) {
+            if ( entries[i].url.length > len ) { return i; }
+        }
+        return n;
     }
-    return -1;
 }
 
 /******************************************************************************/
 
-function addRuleEntry(entries, url, action) {
+function addRuleEntry(entries, url, action, threshold) {
     const entry = new RuleEntry(url, action);
-    const i = indexFromLength(entries, url.length);
-    if ( i === -1 ) {
-        entries.push(entry);
-    } else {
-        entries.splice(i, 0, entry);
-    }
+    const i = indexFromLength(entries, url.length, threshold);
+    entries.splice(i, 0, entry);
 }
 
 /******************************************************************************/
 
 class DynamicURLRuleFiltering {
-    constructor() {
+    constructor(binarySearchThreshold = 50) {
+        this.binarySearchThreshold = binarySearchThreshold;
         this.reset();
     }
 
@@ -166,13 +186,13 @@ class DynamicURLRuleFiltering {
             entries = [];
             this.rules.set(bucketKey, entries);
         }
-        const i = indexOfURL(entries, url);
+        const i = indexOfURL(entries, url, this.binarySearchThreshold);
         if ( i !== -1 ) {
             const entry = entries[i];
             if ( entry.action === action ) { return false; }
             entry.action = action;
         } else {
-            addRuleEntry(entries, url, action);
+            addRuleEntry(entries, url, action, this.binarySearchThreshold);
         }
         this.changed = true;
         return true;
@@ -182,7 +202,7 @@ class DynamicURLRuleFiltering {
         const bucketKey = srcHostname + ' ' + type;
         const entries = this.rules.get(bucketKey);
         if ( entries === undefined ) { return false; }
-        const i = indexOfURL(entries, url);
+        const i = indexOfURL(entries, url, this.binarySearchThreshold);
         if ( i === -1 ) { return false; }
         entries.splice(i, 1);
         if ( entries.length === 0 ) {
