@@ -65,6 +65,9 @@ class RuleEntry {
     constructor(url, action) {
         this.url = url;
         this.action = action;
+        // mark isSimpleMatch for non-wildcard after validateRuleParts
+        const checkStart = url.indexOf('://') + 3;
+        this.isSimpleMatch = !( url.startsWith('*.', checkStart) || url.startsWith('+.', checkStart) );
     }
 }
 
@@ -97,16 +100,31 @@ function indexOfMatch(entries, url) {
     const urlLen = url.length;
     let i = entries.length;
     while ( i-- ) {
-        if ( entries[i].url.length <= urlLen ) {
-            break;
-        }
-    }
-    if ( i !== -1 ) {
-        do {
-            if ( url.startsWith(entries[i].url) ) {
+        const entry = entries[i];
+        if ( entry.isSimpleMatch ) {
+            if ( entry.url.length <= urlLen && url.startsWith(entry.url) ) {
                 return i;
             }
-        } while ( i-- );
+            continue;
+        }
+
+        // Handle rules hostname starts with wildcard (*. or +.)
+        const urlObject = new URL(url);
+        const ruleObject = new URL(entry.url);
+        if ( urlObject.protocol !== ruleObject.protocol ) { continue; }
+        if ( !urlObject.pathname.startsWith(ruleObject.pathname) ) { continue; }
+
+        const ruleDomain = ruleObject.hostname.substring(2);
+        const ruleSubdomain = '.' + ruleDomain;
+        if ( ruleObject.hostname.startsWith('*.') ) {
+            if ( urlObject.hostname.endsWith(ruleSubdomain) && urlObject.hostname.length > ruleDomain.length ) {
+                return i;
+            }
+        } else if ( ruleObject.hostname.startsWith('+.') ) {
+            if ( urlObject.hostname.endsWith(ruleSubdomain) || urlObject.hostname === ruleDomain ) {
+                return i;
+            }
+        }
     }
     return -1;
 }
